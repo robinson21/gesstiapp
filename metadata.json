@@ -1,0 +1,8 @@
+{
+  "name": "Copy of GeSSTIApp Para modificar 2",
+  "description": "Plataforma integral para la gestión de Seguridad y Salud en el Trabajo (SST) en Chile, impulsada por IA para la generación de documentos normativos (ODI, IPER, PTS).",
+  "requestFramePermissions": [
+    "microphone"
+  ],
+  "majorCapabilities": []
+}
