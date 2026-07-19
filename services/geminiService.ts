@@ -1,30 +1,23 @@
 import { WorkerData, IPERRow, AnnualTrainingPlan, CompanyProfile, InteractiveModule } from "../types";
 
-const NVIDIA_API_KEY = import.meta.env.VITE_NVIDIA_API_KEY || import.meta.env.NVIDIA_API_KEY || "";
-const MODEL_NAME = "nvidia/llama-3.3-nemotron-super-49b"; // o el modelo NVIDIA que tengas
+const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycby_BDeMnIVkpITPcsNEJ_jIjfFTc3RNOX6MTxUqqaqKnsKIn_q835THIOjG65vFqab8/exec";
 
-const BASE_URL = "https://integrate.api.nvidia.com/v1";
-
-async function chatCompletion(prompt: string, systemPrompt: string, temperature = 0.3) {
-  const res = await fetch(`${BASE_URL}/chat/completions`, {
+async function nvidiaProxy(prompt: string, systemPrompt = "", temperature = 0.3, maxTokens = 4096): Promise<string> {
+  const res = await fetch(APPS_SCRIPT_URL, {
     method: "POST",
-    headers: {
-      "Authorization": `Bearer ${NVIDIA_API_KEY}`,
-      "Content-Type": "application/json",
-    },
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
-      model: MODEL_NAME,
-      messages: [
-        { role: "system", content: systemPrompt },
-        { role: "user", content: prompt },
-      ],
+      action: "nvidiaProxy",
+      prompt,
+      systemPrompt,
       temperature,
-      max_tokens: 4096,
+      maxTokens,
     }),
   });
-  if (!res.ok) throw new Error(`NVIDIA API error: ${res.status} ${await res.text()}`);
+  if (!res.ok) throw new Error(`Proxy error ${res.status}`);
   const data = await res.json();
-  return data.choices[0].message.content as string;
+  if (data.error) throw new Error(data.error);
+  return data.result as string;
 }
 
 function cleanJson(text: string): string {
@@ -35,11 +28,9 @@ function cleanJson(text: string): string {
   const firstBracket = cleaned.indexOf("[");
   let startIndex = -1, endIndex = -1;
   if (firstBrace !== -1 && (firstBracket === -1 || firstBrace < firstBracket)) {
-    startIndex = firstBrace;
-    endIndex = cleaned.lastIndexOf("}");
+    startIndex = firstBrace; endIndex = cleaned.lastIndexOf("}");
   } else if (firstBracket !== -1) {
-    startIndex = firstBracket;
-    endIndex = cleaned.lastIndexOf("]");
+    startIndex = firstBracket; endIndex = cleaned.lastIndexOf("]");
   }
   if (startIndex === -1) return cleaned;
   return cleaned.slice(startIndex, endIndex + 1);
@@ -69,8 +60,7 @@ Incluye: tema, objetivo, público objetivo, frecuencia, duración, metodología 
 export async function generateIPER(
   industry: string, role: string, workCenter: string, activities: string, customKnowledge?: string
 ): Promise<IPERRow[]> {
-  const prompt = `
-CONTEXTO:
+  const prompt = `CONTEXTO:
 - Cargo: "${role}"
 - Rubro: "${industry}"
 - Centro de trabajo: "${workCenter}"
@@ -79,59 +69,52 @@ ${customKnowledge ? `- Conocimiento adicional:\n${customKnowledge}` : ""}
 
 Genera una matriz IPER en JSON según DS 44 (2024) y ANEXO N°6 GUÍA ISP.
 Cada riesgo debe tener: fecha, cargo, proceso, tarea, tipoTarea, peligro, riesgo, probabilidad, consecuencia, magnitud, nivel, medIngenieria, medAdmin, medEpp, responsable, plazo.
-La respuesta debe ser SOLO un arreglo JSON válido. Ejemplo:
-[{"fecha":"HOY","cargo":"...","proceso":"...","tarea":"...","tipoTarea":"...","peligro":"...","riesgo":"...","probabilidad":4,"consecuencia":4,"magnitud":16,"nivel":"INTOLERABLE","medIngenieria":"...","medAdmin":"...","medEpp":"...","responsable":"...","plazo":"..."}]
-NO escribas texto antes o después del JSON. Solo el arreglo JSON.`;
-  const text = await chatCompletion(prompt, SYSTEM_IPER);
+La respuesta debe ser SOLO un arreglo JSON válido. NO escribas texto antes o después.`;
+  const text = await nvidiaProxy(prompt, SYSTEM_IPER);
   return JSON.parse(cleanJson(text));
 }
 
 export async function generateIRL(companyProfile: CompanyProfile, workers: WorkerData[]): Promise<string> {
-  const prompt = `
-Empresa: ${companyProfile.companyName}
+  const prompt = `Empresa: ${companyProfile.companyName}
 Rubro: ${companyProfile.industry}
 Trabajadores: ${workers.map(w => w.role).join(", ")}
 Genera el IDENTIFICADOR DE REQUISITOS LEGALES (IRL) en formato markdown estructurado.
-Incluye:DS 44, DS 594, Ley 16.744, DS 76, normativa específica del rubro.
-Sé técnico y preciso con los artículos.`;
-  return await chatCompletion(prompt, SYSTEM_IRL, 0.4);
+Incluye: DS 44, DS 594, Ley 16.744, DS 76, normativa específica del rubro.`;
+  return await nvidiaProxy(prompt, SYSTEM_IRL, 0.4);
 }
 
 export async function generateTrainingPlan(
   company: CompanyProfile, workers: WorkerData[]
 ): Promise<AnnualTrainingPlan> {
-  const prompt = `
-Empresa: ${company.companyName}
+  const prompt = `Empresa: ${company.companyName}
 Rubro: ${company.industry}
 Centros de trabajo: ${company.workCenters?.join(", ") || "N/A"}
 Trabajadores: ${workers.map(w => `${w.fullName} (${w.role})`).join(", ")}
 
 Genera un plan anual de capacitación en JSON según Ley 16.744 y DS 40.
-Incluye: temas, objetivos, público, frecuencia, duración, metodología, evaluación.
 La respuesta debe ser SOLO un JSON válido con este formato:
-{"year":2026,"companyName":"...","trainings":[{"title":"...","objective":"...","targetAudience":["..."],"frequency":"...","duration":"...","methodology":"...","evaluation":"...","priority":"Alta|Media|Baja"}]}
-NO escribas texto antes o después del JSON.`;
-  const text = await chatCompletion(prompt, SYSTEM_TRAINING);
+{"year":2026,"companyName":"...","trainings":[{"title":"...","objective":"...","targetAudience":["..."],"frequency":"...","duration":"...","methodology":"...","evaluation":"...","priority":"Alta|Media|Baja"}]}`;
+  const text = await nvidiaProxy(prompt, SYSTEM_TRAINING);
   return JSON.parse(cleanJson(text));
 }
 
 export async function suggestWorkerProfile(role: string, industry: string): Promise<Partial<WorkerData>> {
   const prompt = `Sugiere perfil ocupacional para "${role}" en "${industry}".
 Responde SOLO JSON: {"role":"...","industry":"...","department":"...","modality":"Presencial","risks":["..."],"workEnvironment":"...","activities":"..."}`;
-  return JSON.parse(cleanJson(await chatCompletion(prompt, SYSTEM_IPER, 0.5)));
+  return JSON.parse(cleanJson(await nvidiaProxy(prompt, SYSTEM_IPER, 0.5)));
 }
 
 export async function generateIPERDocumentHTML(rows: IPERRow[]): Promise<string> {
   const rowsHtml = rows.map(r => `
-    <tr class="${r.nivel === 'INTOLERABLE' ? 'bg-red-900/30' : r.nivel === 'IMPORTANTE' ? 'bg-orange-900/30' : r.nivel === 'MODERADO' ? 'bg-yellow-900/30' : 'bg-green-900/30'}">
+    <tr class="${r.nivel === "INTOLERABLE" ? "bg-red-900/30" : r.nivel === "IMPORTANTE" ? "bg-orange-900/30" : r.nivel === "MODERADO" ? "bg-yellow-900/30" : "bg-green-900/30"}">
       <td>${r.fecha}</td><td>${r.cargo}</td><td>${r.proceso}</td><td>${r.tarea}</td>
       <td>${r.peligro}</td><td>${r.riesgo}</td>
       <td class="text-center font-bold">${r.probabilidad}</td>
       <td class="text-center font-bold">${r.consecuencia}</td>
       <td class="text-center font-bold">${r.magnitud}</td>
       <td class="font-bold text-center">${r.nivel}</td>
-      <td>${r.medIngenieria || '-'}</td><td>${r.medAdmin || '-'}</td><td>${r.medEpp || '-'}</td>
-      <td>${r.responsable || '-'}</td><td>${r.plazo || '-'}</td>
+      <td>${r.medIngenieria || "-"}</td><td>${r.medAdmin || "-"}</td><td>${r.medEpp || "-"}</td>
+      <td>${r.responsable || "-"}</td><td>${r.plazo || "-"}</td>
     </tr>`).join("");
   return `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Matriz IPER</title>
   <script src="https://cdn.tailwindcss.com"></script></head>
@@ -140,39 +123,24 @@ export async function generateIPERDocumentHTML(rows: IPERRow[]): Promise<string>
 }
 
 export async function chatWithSSTExpert(message: string, history?: {role:string,content:string}[]): Promise<string> {
-  const hist = (history || []).map(h => ({ role: h.role, content: h.content }));
-  const systemMsg = { role: "system", content: SYSTEM_IPER + "\nEres un asistente de SST en Chile. Responde en español." };
-  const body = {
-    model: MODEL_NAME,
-    messages: [systemMsg, ...hist, { role: "user", content: message }],
-    temperature: 0.4,
-    max_tokens: 2048,
-  };
-  const res = await fetch(`${BASE_URL}/chat/completions`, {
-    method: "POST",
-    headers: { "Authorization": `Bearer ${NVIDIA_API_KEY}`, "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-  });
-  if (!res.ok) throw new Error(`NVIDIA API error: ${res.status}`);
-  const data = await res.json();
-  return data.choices[0].message.content as string;
+  const system = SYSTEM_IPER + "\nEres un asistente de SST en Chile. Responde en español.";
+  return await nvidiaProxy(message, system, 0.4, 2048);
 }
 
 export async function suggestPTSList(industry: string, role: string): Promise<string[]> {
   const prompt = `Sugiere 5-10 procedimientos de trabajo seguro (PTS) para "${role}" en "${industry}".
-Responde SOLO JSON array de strings: ["PTS 1", "PTS 2", ...]`;
-  return JSON.parse(cleanJson(await chatCompletion(prompt, SYSTEM_IPER, 0.4)));
+Responde SOLO JSON array: ["PTS 1", "PTS 2", ...]`;
+  return JSON.parse(cleanJson(await nvidiaProxy(prompt, SYSTEM_IPER, 0.4)));
 }
 
 export async function generateSpecificPTS(title: string, industry: string): Promise<string> {
   const prompt = `Genera un Procedimiento de Trabajo Seguro (PTS) completo para: "${title}" en "${industry}".
-Incluye: objetivo, alcance, definiciones, responsabilidades, pasos ordenados, EPP requerido, medidas de control, referencias normativas.
-Sé técnico y detallado.`;
-  return await chatCompletion(prompt, SYSTEM_IPER, 0.3);
+Incluye: objetivo, alcance, definiciones, responsabilidades, pasos ordenados, EPP requerido, medidas de control, referencias normativas.`;
+  return await nvidiaProxy(prompt, SYSTEM_IPER, 0.3);
 }
 
 export async function generateInteractiveTrainingContent(title: string): Promise<InteractiveModule> {
   const prompt = `Genera módulo de capacitación interactivo para: "${title}".
 Responde SOLO JSON: {"title":"...","slides":[{"title":"...","content":"...","quiz":{"question":"...","options":["...","...","...","..."],"correct":0}}],"duration":"10 min"}]}`;
-  return JSON.parse(cleanJson(await chatCompletion(prompt, SYSTEM_TRAINING, 0.4)));
+  return JSON.parse(cleanJson(await nvidiaProxy(prompt, SYSTEM_TRAINING, 0.4)));
 }
