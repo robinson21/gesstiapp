@@ -2,22 +2,25 @@ import { WorkerData, IPERRow, AnnualTrainingPlan, CompanyProfile, InteractiveMod
 
 const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycby_BDeMnIVkpITPcsNEJ_jIjfFTc3RNOX6MTxUqqaqKnsKIn_q835THIOjG65vFqab8/exec";
 
-async function nvidiaProxy(prompt: string, systemPrompt = "", temperature = 0.3, maxTokens = 4096): Promise<string> {
+async function aiProxy(prompt: string, systemInstruction: string, temperature = 0.3, maxTokens = 4096): Promise<string> {
   const res = await fetch(APPS_SCRIPT_URL, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
-      action: "nvidiaProxy",
-      prompt,
-      systemPrompt,
-      temperature,
-      maxTokens,
+      type: "AI_GENERATE",
+      payload: {
+        prompt,
+        systemInstruction: systemInstruction || "",
+        history: [],
+        temperature,
+        maxTokens,
+      },
     }),
   });
   if (!res.ok) throw new Error(`Proxy error ${res.status}`);
   const data = await res.json();
-  if (data.error) throw new Error(data.error);
-  return data.result as string;
+  if (data.status === "error") throw new Error(data.message || "Unknown error");
+  return data.text as string;
 }
 
 function cleanJson(text: string): string {
@@ -34,10 +37,6 @@ function cleanJson(text: string): string {
   }
   if (startIndex === -1) return cleaned;
   return cleaned.slice(startIndex, endIndex + 1);
-}
-
-function cleanStr(text: string): string {
-  return text.replace(/[\n\r]+/g, " ").replace(/\s+/g, " ").trim();
 }
 
 const SYSTEM_IPER = `Eres un Experto Prevencionista de Riesgos (Ingeniero en Prevención) en Chile (SNS).
@@ -70,7 +69,7 @@ ${customKnowledge ? `- Conocimiento adicional:\n${customKnowledge}` : ""}
 Genera una matriz IPER en JSON según DS 44 (2024) y ANEXO N°6 GUÍA ISP.
 Cada riesgo debe tener: fecha, cargo, proceso, tarea, tipoTarea, peligro, riesgo, probabilidad, consecuencia, magnitud, nivel, medIngenieria, medAdmin, medEpp, responsable, plazo.
 La respuesta debe ser SOLO un arreglo JSON válido. NO escribas texto antes o después.`;
-  const text = await nvidiaProxy(prompt, SYSTEM_IPER);
+  const text = await aiProxy(prompt, SYSTEM_IPER);
   return JSON.parse(cleanJson(text));
 }
 
@@ -80,7 +79,7 @@ Rubro: ${companyProfile.industry}
 Trabajadores: ${workers.map(w => w.role).join(", ")}
 Genera el IDENTIFICADOR DE REQUISITOS LEGALES (IRL) en formato markdown estructurado.
 Incluye: DS 44, DS 594, Ley 16.744, DS 76, normativa específica del rubro.`;
-  return await nvidiaProxy(prompt, SYSTEM_IRL, 0.4);
+  return await aiProxy(prompt, SYSTEM_IRL);
 }
 
 export async function generateTrainingPlan(
@@ -94,14 +93,14 @@ Trabajadores: ${workers.map(w => `${w.fullName} (${w.role})`).join(", ")}
 Genera un plan anual de capacitación en JSON según Ley 16.744 y DS 40.
 La respuesta debe ser SOLO un JSON válido con este formato:
 {"year":2026,"companyName":"...","trainings":[{"title":"...","objective":"...","targetAudience":["..."],"frequency":"...","duration":"...","methodology":"...","evaluation":"...","priority":"Alta|Media|Baja"}]}`;
-  const text = await nvidiaProxy(prompt, SYSTEM_TRAINING);
+  const text = await aiProxy(prompt, SYSTEM_TRAINING);
   return JSON.parse(cleanJson(text));
 }
 
 export async function suggestWorkerProfile(role: string, industry: string): Promise<Partial<WorkerData>> {
   const prompt = `Sugiere perfil ocupacional para "${role}" en "${industry}".
 Responde SOLO JSON: {"role":"...","industry":"...","department":"...","modality":"Presencial","risks":["..."],"workEnvironment":"...","activities":"..."}`;
-  return JSON.parse(cleanJson(await nvidiaProxy(prompt, SYSTEM_IPER, 0.5)));
+  return JSON.parse(cleanJson(await aiProxy(prompt, SYSTEM_IPER)));
 }
 
 export async function generateIPERDocumentHTML(rows: IPERRow[]): Promise<string> {
@@ -123,24 +122,23 @@ export async function generateIPERDocumentHTML(rows: IPERRow[]): Promise<string>
 }
 
 export async function chatWithSSTExpert(message: string, history?: {role:string,content:string}[]): Promise<string> {
-  const system = SYSTEM_IPER + "\nEres un asistente de SST en Chile. Responde en español.";
-  return await nvidiaProxy(message, system, 0.4, 2048);
+  return await aiProxy(message, SYSTEM_IPER, 0.4, 2048);
 }
 
 export async function suggestPTSList(industry: string, role: string): Promise<string[]> {
   const prompt = `Sugiere 5-10 procedimientos de trabajo seguro (PTS) para "${role}" en "${industry}".
 Responde SOLO JSON array: ["PTS 1", "PTS 2", ...]`;
-  return JSON.parse(cleanJson(await nvidiaProxy(prompt, SYSTEM_IPER, 0.4)));
+  return JSON.parse(cleanJson(await aiProxy(prompt, SYSTEM_IPER)));
 }
 
 export async function generateSpecificPTS(title: string, industry: string): Promise<string> {
   const prompt = `Genera un Procedimiento de Trabajo Seguro (PTS) completo para: "${title}" en "${industry}".
 Incluye: objetivo, alcance, definiciones, responsabilidades, pasos ordenados, EPP requerido, medidas de control, referencias normativas.`;
-  return await nvidiaProxy(prompt, SYSTEM_IPER, 0.3);
+  return await aiProxy(prompt, SYSTEM_IPER);
 }
 
 export async function generateInteractiveTrainingContent(title: string): Promise<InteractiveModule> {
   const prompt = `Genera módulo de capacitación interactivo para: "${title}".
 Responde SOLO JSON: {"title":"...","slides":[{"title":"...","content":"...","quiz":{"question":"...","options":["...","...","...","..."],"correct":0}}],"duration":"10 min"}]}`;
-  return JSON.parse(cleanJson(await nvidiaProxy(prompt, SYSTEM_TRAINING, 0.4)));
+  return JSON.parse(cleanJson(await aiProxy(prompt, SYSTEM_TRAINING)));
 }
